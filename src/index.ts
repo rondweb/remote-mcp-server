@@ -12,12 +12,55 @@ const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_KEY || "e6724152b4e4113929
 const CLOUDFLARE_EMAIL = process.env.CLOUDFLARE_EMAIL || "rondweb@gmail.com";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "6760bc62386c6b7df606414571f8164c";
 
+/**
+ * Implementation of an MCP (Multi-agent Communication Protocol) server with various AI-powered tools.
+ * 
+ * @class
+ * @extends McpAgent
+ * 
+ * @example
+ * const myMcpServer = new MyMCP();
+ * await myMcpServer.init();
+ */
 export class MyMCP extends McpAgent {
     server = new McpServer({
-        name: "Demo",
+        name: "TextSummarizationAndScrapping",
         version: "1.0.0",
     });
 
+	/**
+	 * Initializes the server by registering available tools.
+	 * 
+	 * This method sets up the following tools:
+	 * - `fetchAudioAndSave`: Converts text to speech using Cloudflare's MeloTTS API and returns
+	 *   the audio as base64 data along with a generated UUID.
+	 * - `summarizeText`: Summarizes provided text using Cloudflare's BART-large-CNN model,
+	 *   limiting the output to 100 tokens.
+	 * - `scrapeUrlAndSublinks`: Retrieves content from a specified URL and up to 5 sublinks,
+	 *   returning the scraped text content as a structured JSON resource.
+	 * 
+	 * Each tool is registered with proper input validation using Zod schemas and
+	 * includes error handling for API failures or unexpected responses.
+	 * 
+	 * @returns {Promise<void>} A promise that resolves when all tools are registered
+	 */
+	/**
+	 * Initializes the server with custom tools for text-to-speech, text summarization, and web scraping.
+	 * 
+	 * Sets up the following tools:
+	 * - `fetchAudioAndSave`: Converts text to speech using Cloudflare's MeloTTS API and returns the 
+	 *   audio as base64 along with a generated UUID. Supports different languages via the lang parameter.
+	 * 
+	 * - `summarizeText`: Generates a summary of provided text using Cloudflare's BART-large-CNN model.
+	 *   Limits output to 100 tokens.
+	 * 
+	 * - `scrapeUrlAndSublinks`: Fetches the content of a specified URL and extracts up to 5 sublinks.
+	 *   For each sublink, also retrieves its content. Returns JSON with the main URL content and sublink contents.
+	 * 
+	 * @async
+	 * @returns {Promise<void>} A promise that resolves when all tools are registered
+	 * @throws Will log errors that occur during tool registration or execution
+	 */
     async init() {
         // Modify fetchAudioAndSave to return base64 audio instead of saving to file
         this.server.tool(

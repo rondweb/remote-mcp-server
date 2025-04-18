@@ -27,6 +27,11 @@
 			"binding": "OAUTH_KV",
 			"id": "e772b15245d24eefb62510b0f3389444"
 		}
+		// ,
+		// {
+		// 	"binding": "OAUTH_KV",
+		// 	"id": "b4362a8923aa41b6a190f7ea52659597"
+		// }
 	],
 	"observability": {
 		"enabled": true

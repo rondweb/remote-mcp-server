@@ -11,6 +11,7 @@ import * as cheerio from "cheerio"; // Ensure cheerio is installed and marked as
 const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_KEY || "e6724152b4e4113929c4baca8b9585a3e5d95";
 const CLOUDFLARE_EMAIL = process.env.CLOUDFLARE_EMAIL || "rondweb@gmail.com";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "6760bc62386c6b7df606414571f8164c";
+const R2_URL = "https://pub-3bf40eb073024dc2846e1518b851c583.r2.dev"
 
 /**
  * Implementation of an MCP (Multi-agent Communication Protocol) server with various AI-powered tools.
@@ -45,7 +46,7 @@ export class MyMCP extends McpAgent {
 	 * @returns {Promise<void>} A promise that resolves when all tools are registered
 	 */
 	/**
-	 * Initializes the server with custom tools for text-to-speech, text summarization, and web scraping.
+	 * Initializes the server with custom tools for text-to-speech, text summarization, web scraping, and file uploads.
 	 * 
 	 * Sets up the following tools:
 	 * - `fetchAudioAndSave`: Converts text to speech using Cloudflare's MeloTTS API and returns the 
@@ -56,6 +57,9 @@ export class MyMCP extends McpAgent {
 	 * 
 	 * - `scrapeUrlAndSublinks`: Fetches the content of a specified URL and extracts up to 5 sublinks.
 	 *   For each sublink, also retrieves its content. Returns JSON with the main URL content and sublink contents.
+	 * 
+	 * - `uploadAudioToR2`: Uploads audio files (base64) to Cloudflare R2 storage and returns the public URL.
+	 *   Accepts optional fileName and contentType parameters.
 	 * 
 	 * @async
 	 * @returns {Promise<void>} A promise that resolves when all tools are registered
@@ -96,9 +100,9 @@ export class MyMCP extends McpAgent {
                                     {
                                         type: "resource",
                                         resource: {
-                                            media_type: "audio/mp3",
-                                            data: audioBase64,
-                                            name: `${audioId}.mp3`
+                                            uri: `data:audio/mp3;base64,${audioBase64}`,
+                                            blob: audioBase64,
+                                            mimeType: "audio/mp3"
                                         }
                                     }
                                 ] 
@@ -110,11 +114,11 @@ export class MyMCP extends McpAgent {
                         throw new Error(`Request failed: ${response.status} - ${response.statusText}`);
                     }
                 } catch (error) {
-                    console.error("Error in fetchAudioAndSave:", error.response?.data || error.message);
+                    console.error("Error in fetchAudioAndSave:", (error as any).response?.data || (error as Error).message);
                     return { 
                         content: [{ 
                             type: "text", 
-                            text: `Error: ${error.response?.data?.errors?.[0]?.message || error.message}` 
+                            text: `Error: ${(error as any).response?.data?.errors?.[0]?.message || (error as Error).message}` 
                         }] 
                     };
                 }
@@ -156,11 +160,11 @@ export class MyMCP extends McpAgent {
                         throw new Error(`Request failed: ${response.status} - ${response.statusText}`);
                     }
                 } catch (error) {
-                    console.error("Error in summarizeText:", error.response?.data || error.message);
+                    console.error("Error in summarizeText:", (error as any).response?.data || (error as Error).message);
                     return { 
                         content: [{ 
                             type: "text", 
-                            text: `Error: ${error.response?.data?.errors?.[0]?.message || error.message}` 
+                            text: `Error: ${(error as any).response?.data?.errors?.[0]?.message || (error as Error).message}` 
                         }] 
                     };
                 }
@@ -205,6 +209,70 @@ export class MyMCP extends McpAgent {
                     };
                 } catch (error) {
                     return { content: [{ type: "text", text: `Error: ${(error as Error).message}` }] };
+                }
+            }
+        );
+
+        // Adding uploadAudioToR2 as a tool
+        this.server.tool(
+            "uploadAudioToR2",
+            { 
+                audioData: z.string(), 
+                fileName: z.string().optional(),
+                contentType: z.string().optional() 
+            },
+            async ({ audioData, fileName, contentType = "audio/mp3" }) => {
+                try {
+                    // Generate a unique filename if not provided
+                    const finalFileName = fileName || `audio-${uuid.v4()}.mp3`;
+                    
+                    // Convert base64 to buffer
+                    const audioBuffer = Buffer.from(audioData, 'base64');
+                    
+                    // Construct the R2 API endpoint for uploading
+                    const bucketName = "uploads";
+                    const uploadUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucketName}/objects/${finalFileName}`;
+                    
+                    const headers = {
+                        "Content-Type": contentType,
+                        "X-Auth-Email": CLOUDFLARE_EMAIL,
+                        "X-Auth-Key": CLOUDFLARE_API_KEY,
+                        "Content-Length": audioBuffer.length.toString(),
+                    };
+
+                    console.log(`Uploading audio to R2: ${finalFileName}`);
+                    const response = await axios.put(uploadUrl, audioBuffer, { headers });
+
+                    if (response.status === 200 || response.status === 201) {
+                        const fileUrl = `${R2_URL}/${finalFileName}`;
+                        
+                        return { 
+                            content: [
+                                { 
+                                    type: "text", 
+                                    text: `Audio file successfully uploaded to R2 storage.\nFile: ${finalFileName}\nURL: ${fileUrl}` 
+                                },
+                                {
+                                    type: "resource",
+                                    resource: {
+                                        uri: fileUrl,
+                                        blob: audioData,
+                                        mimeType: contentType
+                                    }
+                                }
+                            ] 
+                        };
+                    } else {
+                        throw new Error(`Upload failed: ${response.status} - ${response.statusText}`);
+                    }
+                } catch (error) {
+                    console.error("Error in uploadAudioToR2:", (error as any).response?.data || (error as Error).message);
+                    return { 
+                        content: [{ 
+                            type: "text", 
+                            text: `Error uploading to R2: ${(error as any).response?.data?.errors?.[0]?.message || (error as Error).message}` 
+                        }] 
+                    };
                 }
             }
         );

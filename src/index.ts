@@ -70,10 +70,14 @@ export class MyMCP extends McpAgent {
      * @throws Will log errors that occur during tool registration or execution
      */
     async init() {
-        // Modify fetchAudioAndSave to return base64 audio instead of saving to file
+        // Text-to-Speech tool using Cloudflare's MeloTTS AI model
         this.server.tool(
             "fetchAudioAndSave",
-            { text: z.string().optional(), lang: z.string().optional() },
+            "Converts text to speech using Cloudflare's MeloTTS AI model. Returns audio as base64 encoded data with a unique ID. Supports multiple languages for international text-to-speech conversion.",
+            { 
+                text: z.string().optional().describe("The text to convert to speech. Can be any readable text content."), 
+                lang: z.string().optional().describe("Language code for speech synthesis (e.g., 'en' for English, 'es' for Spanish, 'fr' for French). Defaults to 'en'.")
+            },
             async ({ text = "", lang = "en" }) => {
                 try {
                     const key = CLOUDFLARE_API_KEY;
@@ -129,10 +133,13 @@ export class MyMCP extends McpAgent {
             }
         );
 
-        // Adding summarizeText as a tool
+        // Text summarization tool using Cloudflare's BART model
         this.server.tool(
             "summarizeText",
-            { text: z.string() },
+            "Summarizes long text content using Cloudflare's BART-large-CNN AI model. Reduces lengthy documents, articles, or text into concise summaries limited to 100 tokens. Ideal for content analysis and quick understanding of large texts.",
+            { 
+                text: z.string().describe("The text content to summarize. Can be articles, documents, web content, or any lengthy text that needs condensing.")
+            },
             async ({ text }) => {
                 try {
                     const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/facebook/bart-large-cnn`;
@@ -175,10 +182,13 @@ export class MyMCP extends McpAgent {
             }
         );
 
-        // Adding scrapeUrlAndSublinks as a tool
+        // Web scraping tool for URL content extraction
         this.server.tool(
             "scrapeUrlAndSublinks",
-            { url: z.string() },
+            "Scrapes and extracts text content from a specified URL and up to 5 of its sublinks. Returns structured data containing the main page content and sublink contents. Useful for research, content analysis, and gathering information from websites.",
+            { 
+                url: z.string().describe("The target URL to scrape. Must be a valid HTTP/HTTPS URL. The tool will extract text content from this page and follow up to 5 internal links.")
+            },
             async ({ url }, extra) => {
                 try {
                     const response = await axios.get(url);
@@ -217,13 +227,14 @@ export class MyMCP extends McpAgent {
             }
         );
 
-        // Adding uploadAudioToR2 as a tool
+        // File upload tool for Cloudflare R2 storage
         this.server.tool(
             "uploadAudioToR2",
+            "Uploads audio files to Cloudflare R2 storage and returns a public URL. Accepts base64 encoded audio data and automatically detects content type. Supports various audio formats including MP3 and WAV. Perfect for storing generated audio files or user uploads.",
             {
-                fileData: z.string(), // base64 encoded file data
-                fileName: z.string().optional(),
-                contentType: z.string().optional()
+                fileData: z.string().describe("Base64 encoded audio file data. This should be the raw audio content encoded in base64 format."),
+                fileName: z.string().optional().describe("Optional custom filename for the uploaded file. If not provided, a UUID-based filename will be generated automatically."),
+                contentType: z.string().optional().describe("Optional MIME type of the audio file (e.g., 'audio/mp3', 'audio/wav'). If not provided, the tool will attempt to detect the type automatically.")
             },
             async ({ fileData, fileName, contentType }) => {
                 try {
@@ -293,12 +304,13 @@ export class MyMCP extends McpAgent {
             }
         );
 
-        // Adding getFromCloudflareKV as a tool
+        // Cloudflare KV storage retrieval tool
         this.server.tool(
             "getFromCloudflareKV",
+            "Retrieves stored values from Cloudflare KV (Key-Value) storage using a specified key. KV storage is useful for caching data, storing configuration, or maintaining state across requests. Returns the stored value or indicates if the key doesn't exist.",
             {
-                key: z.string(),
-                namespaceId: z.string().optional()
+                key: z.string().describe("The key name to lookup in KV storage. This should be the exact key used when the value was stored."),
+                namespaceId: z.string().optional().describe("Optional KV namespace ID. If not provided, uses the default namespace configured in the environment. Different namespaces allow for data separation and organization.")
             },
             async ({ key, namespaceId }) => {
                 try {

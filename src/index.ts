@@ -11,6 +11,7 @@ import * as cheerio from "cheerio"; // Ensure cheerio is installed and marked as
 const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_KEY || "e6724152b4e4113929c4baca8b9585a3e5d95";
 const CLOUDFLARE_EMAIL = process.env.CLOUDFLARE_EMAIL || "rondweb@gmail.com";
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || "6760bc62386c6b7df606414571f8164c";
+const CLOUDFLARE_NAMESPACE_ID = process.env.CLOUDFLARE_NAMESPACE_ID || "your-namespace-id"; // Add your KV namespace ID
 const R2_URL = "https://pub-3bf40eb073024dc2846e1518b851c583.r2.dev"
 
 /**
@@ -60,6 +61,9 @@ export class MyMCP extends McpAgent {
 	 * 
 	 * - `uploadAudioToR2`: Uploads audio files (base64) to Cloudflare R2 storage and returns the public URL.
 	 *   Accepts optional fileName and contentType parameters.
+	 * 
+	 * - `getFromCloudflareKV`: Retrieves values from Cloudflare KV storage using a specified key.
+	 *   Optionally accepts a namespace ID. Returns the value or an error message.
 	 * 
 	 * @async
 	 * @returns {Promise<void>} A promise that resolves when all tools are registered
@@ -217,60 +221,146 @@ export class MyMCP extends McpAgent {
         this.server.tool(
             "uploadAudioToR2",
             { 
-                audioData: z.string(), 
-                fileName: z.string().optional(),
-                contentType: z.string().optional() 
+            fileData: z.string(), // base64 encoded file data
+            fileName: z.string().optional(),
+            contentType: z.string().optional() 
             },
-            async ({ audioData, fileName, contentType = "audio/mp3" }) => {
+            async ({ fileData, fileName, contentType }) => {
+            try {
+                // Detect content type from file data if not provided
+                let finalContentType = contentType;
+                if (!finalContentType) {
+                // Simple detection based on base64 header or default to mp3
+                if (fileData.startsWith('UklGR')) { // WAV file signature in base64
+                    finalContentType = "audio/wav";
+                } else {
+                    finalContentType = "audio/mp3";
+                }
+                }
+                
+                // Generate appropriate file extension
+                const extension = finalContentType.includes('wav') ? 'wav' : 'mp3';
+                const finalFileName = fileName || `audio-${uuid.v4()}.${extension}`;
+                
+                // Convert base64 to buffer
+                const fileBuffer = Buffer.from(fileData, 'base64');
+                
+                // Construct the R2 API endpoint for uploading
+                const bucketName = "uploads";
+                const uploadUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucketName}/objects/${finalFileName}`;
+                
+                const headers = {
+                "Content-Type": finalContentType,
+                "X-Auth-Email": CLOUDFLARE_EMAIL,
+                "X-Auth-Key": CLOUDFLARE_API_KEY,
+                "Content-Length": fileBuffer.length.toString(),
+                };
+
+                console.log(`Uploading ${finalContentType} file to R2: ${finalFileName}`);
+                const response = await axios.put(uploadUrl, fileBuffer, { headers });
+
+                if (response.status === 200 || response.status === 201) {
+                const fileUrl = `${R2_URL}/${finalFileName}`;
+                
+                return { 
+                    content: [
+                    { 
+                        type: "text", 
+                        text: `File successfully uploaded to R2 storage.\nFile: ${finalFileName}\nURL: ${fileUrl}\nType: ${finalContentType}` 
+                    },
+                    {
+                        type: "resource",
+                        resource: {
+                        uri: fileUrl,
+                        blob: fileData,
+                        mimeType: finalContentType
+                        }
+                    }
+                    ] 
+                };
+                } else {
+                throw new Error(`Upload failed: ${response.status} - ${response.statusText}`);
+                }
+            } catch (error) {
+                console.error("Error in uploadAudioToR2:", (error as any).response?.data || (error as Error).message);
+                return { 
+                content: [{ 
+                    type: "text", 
+                    text: `Error uploading to R2: ${(error as any).response?.data?.errors?.[0]?.message || (error as Error).message}` 
+                }] 
+                };
+            }
+            }
+        );
+
+        // Adding getFromCloudflareKV as a tool
+        this.server.tool(
+            "getFromCloudflareKV",
+            { 
+                key: z.string(),
+                namespaceId: z.string().optional()
+            },
+            async ({ key, namespaceId }) => {
                 try {
-                    // Generate a unique filename if not provided
-                    const finalFileName = fileName || `audio-${uuid.v4()}.mp3`;
+                    const finalNamespaceId = namespaceId || CLOUDFLARE_NAMESPACE_ID;
                     
-                    // Convert base64 to buffer
-                    const audioBuffer = Buffer.from(audioData, 'base64');
-                    
-                    // Construct the R2 API endpoint for uploading
-                    const bucketName = "uploads";
-                    const uploadUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${bucketName}/objects/${finalFileName}`;
+                    // Construct the KV API endpoint for reading a value
+                    const kvUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${finalNamespaceId}/values/${encodeURIComponent(key)}`;
                     
                     const headers = {
-                        "Content-Type": contentType,
                         "X-Auth-Email": CLOUDFLARE_EMAIL,
                         "X-Auth-Key": CLOUDFLARE_API_KEY,
-                        "Content-Length": audioBuffer.length.toString(),
                     };
 
-                    console.log(`Uploading audio to R2: ${finalFileName}`);
-                    const response = await axios.put(uploadUrl, audioBuffer, { headers });
+                    console.log(`Retrieving value from Cloudflare KV for key: ${key}`);
+                    const response = await axios.get(kvUrl, { headers });
 
-                    if (response.status === 200 || response.status === 201) {
-                        const fileUrl = `${R2_URL}/${finalFileName}`;
+                    if (response.status === 200) {
+                        const value = response.data;
                         
                         return { 
                             content: [
                                 { 
                                     type: "text", 
-                                    text: `Audio file successfully uploaded to R2 storage.\nFile: ${finalFileName}\nURL: ${fileUrl}` 
+                                    text: `Successfully retrieved value from Cloudflare KV.\nKey: ${key}\nValue: ${typeof value === 'string' ? value : JSON.stringify(value)}` 
                                 },
                                 {
                                     type: "resource",
                                     resource: {
-                                        uri: fileUrl,
-                                        blob: audioData,
-                                        mimeType: contentType
+                                        uri: `kv://${finalNamespaceId}/${key}`,
+                                        text: typeof value === 'string' ? value : JSON.stringify(value),
+                                        mimeType: "text/plain"
                                     }
                                 }
                             ] 
                         };
+                    } else if (response.status === 404) {
+                        return { 
+                            content: [{ 
+                                type: "text", 
+                                text: `Key '${key}' not found in Cloudflare KV namespace.` 
+                            }] 
+                        };
                     } else {
-                        throw new Error(`Upload failed: ${response.status} - ${response.statusText}`);
+                        throw new Error(`Request failed: ${response.status} - ${response.statusText}`);
                     }
                 } catch (error) {
-                    console.error("Error in uploadAudioToR2:", (error as any).response?.data || (error as Error).message);
+                    console.error("Error in getFromCloudflareKV:", (error as any).response?.data || (error as Error).message);
+                    
+                    // Handle 404 errors specifically
+                    if ((error as any).response?.status === 404) {
+                        return { 
+                            content: [{ 
+                                type: "text", 
+                                text: `Key '${key}' not found in Cloudflare KV namespace.` 
+                            }] 
+                        };
+                    }
+                    
                     return { 
                         content: [{ 
                             type: "text", 
-                            text: `Error uploading to R2: ${(error as any).response?.data?.errors?.[0]?.message || (error as Error).message}` 
+                            text: `Error retrieving from Cloudflare KV: ${(error as any).response?.data?.errors?.[0]?.message || (error as Error).message}` 
                         }] 
                     };
                 }
